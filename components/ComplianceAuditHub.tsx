@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as mammoth from 'mammoth';
 import { 
   ClipboardCheck, 
@@ -16,17 +16,32 @@ import {
   ArrowRight,
   Upload,
   FileType,
-  X
+  X,
+  History,
+  ChevronDown,
+  ChevronUp,
+  Clock
 } from 'lucide-react';
 import { evaluateCompliance, generateCertificationReport, parseRegulationDocument, extractRequirementsFromDocument } from '../services/geminiService';
 import { ComplianceAuditResult, PLMDataArtifact, ProcessedSegment, CertificationReport } from '../types';
 
-// Mock PLM Data Simulation
+interface AuditHistoryEntry {
+    id: string;
+    date: string;
+    title: string;
+    score: number;
+    riskLevel: string;
+    regSegments: ProcessedSegment[];
+    plmData: PLMDataArtifact[];
+    auditResult: ComplianceAuditResult;
+    report: CertificationReport | null;
+}
+
 const MOCK_PLM_DATA: PLMDataArtifact[] = [
     { id: "REQ-001", type: "REQUIREMENT", name: "System Boot Time", status: "APPROVED", contentSnippet: "System shall boot within 5 seconds.", traceLinks: ["TEST-001"] },
     { id: "TEST-001", type: "TEST_CASE", name: "Boot Timing Test", status: "APPROVED", contentSnippet: "Measure time from power on to UI load.", traceLinks: ["RES-001"] },
     { id: "RES-001", type: "TEST_RESULT", name: "Boot Test Log", status: "APPROVED", contentSnippet: "Result: 4.8s. PASS.", traceLinks: [] },
-    { id: "REQ-002", type: "REQUIREMENT", name: "Failure Annunciation", status: "DRAFT", contentSnippet: "System must alert crew on failure.", traceLinks: [] }, // Missing Trace
+    { id: "REQ-002", type: "REQUIREMENT", name: "Failure Annunciation", status: "DRAFT", contentSnippet: "System must alert crew on failure.", traceLinks: [] }, 
     { id: "DES-101", type: "DESIGN_DOC", name: "Architecture Spec", status: "APPROVED", contentSnippet: "High Level Design of Avionics Bus.", traceLinks: ["REQ-001"] },
 ];
 
@@ -37,7 +52,7 @@ const DEFAULT_REGULATION_TEXT = `CS-25.1309 Equipment, systems and installations
 const ComplianceAuditHub: React.FC = () => {
     const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'GAPS' | 'REPORT'>('OVERVIEW');
     const [isLoading, setIsLoading] = useState(false);
-    const [step, setStep] = useState(0); // 0: Init, 1: Extracting/Loading, 2: Analyzing, 3: Done
+    const [step, setStep] = useState(0); 
     
     // State
     const [regSegments, setRegSegments] = useState<ProcessedSegment[]>([]);
@@ -45,21 +60,61 @@ const ComplianceAuditHub: React.FC = () => {
     const [auditResult, setAuditResult] = useState<ComplianceAuditResult | null>(null);
     const [report, setReport] = useState<CertificationReport | null>(null);
     
+    // History State
+    const [history, setHistory] = useState<AuditHistoryEntry[]>([]);
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+
     // File Upload State
     const [uploadedFile, setUploadedFile] = useState<{ name: string; size: number; mimeType: string; data: string | ArrayBuffer } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // --- Actions ---
+    // Load history on mount
+    useEffect(() => {
+        const savedHistory = localStorage.getItem('aero_audit_history');
+        if (savedHistory) {
+            try {
+                setHistory(JSON.parse(savedHistory));
+            } catch (e) {
+                console.error("Failed to parse audit history", e);
+            }
+        }
+    }, []);
+
+    // Save history when it changes
+    useEffect(() => {
+        localStorage.setItem('aero_audit_history', JSON.stringify(history));
+    }, [history]);
+
+    const addToHistory = (result: ComplianceAuditResult, currentReport: CertificationReport | null) => {
+        const newEntry: AuditHistoryEntry = {
+            id: Date.now().toString(),
+            date: new Date().toLocaleString(),
+            title: uploadedFile?.name || "Automated PLM Audit",
+            score: result.overallScore,
+            riskLevel: result.riskLevel,
+            regSegments,
+            plmData,
+            auditResult: result,
+            report: currentReport
+        };
+        setHistory(prev => [newEntry, ...prev.slice(0, 9)]); // Keep last 10
+    };
+
+    const loadHistoryEntry = (entry: AuditHistoryEntry) => {
+        setRegSegments(entry.regSegments);
+        setPlmData(entry.plmData);
+        setAuditResult(entry.auditResult);
+        setReport(entry.report);
+        setStep(3);
+        setIsHistoryOpen(false);
+        setActiveTab('OVERVIEW');
+    };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
         const fileName = file.name.toLowerCase();
-        let fileData: string | ArrayBuffer = "";
-        let mimeType = "";
-
-        // Simple read logic similar to parser but storing raw for extraction service
         if (fileName.endsWith('.pdf')) {
             const reader = new FileReader();
             reader.onload = (ev) => {
@@ -68,12 +123,6 @@ const ComplianceAuditHub: React.FC = () => {
             };
             reader.readAsDataURL(file);
         } else if (fileName.endsWith('.docx')) {
-            // For DOCX we want text for the extractor, or pass buffer if service handled it.
-            // Service expects text or base64. Let's extract text client side for simplicity or send text.
-            // Requirement says "upload PDF, Word...". 
-            // Our service `extractRequirementsFromDocument` takes string or {data, mimeType}.
-            // For DOCX, extracting text here is safer/cheaper than sending binary to multimodal model if not needed.
-            // But let's try to preserve structure. Let's just pass text for DOCX.
             try {
                 const arrayBuffer = await file.arrayBuffer();
                 const result = await mammoth.extractRawText({ arrayBuffer });
@@ -82,7 +131,6 @@ const ComplianceAuditHub: React.FC = () => {
                 alert("Error reading DOCX");
             }
         } else {
-             // Text, HTML, JSON, XML
              const text = await file.text();
              setUploadedFile({ name: file.name, size: file.size, mimeType: 'text/plain', data: text });
         }
@@ -93,11 +141,8 @@ const ComplianceAuditHub: React.FC = () => {
         setIsLoading(true);
         setStep(1);
         try {
-            // 1. Simulate PLM Fetch
             await new Promise(r => setTimeout(r, 1000));
             setPlmData(MOCK_PLM_DATA);
-            
-            // Proceed to Analysis
             await runAnalysis(MOCK_PLM_DATA);
         } catch (e) {
             alert("PLM Connection Failed.");
@@ -111,31 +156,23 @@ const ComplianceAuditHub: React.FC = () => {
         if (!uploadedFile) return;
         setIsLoading(true);
         setStep(1);
-        
         try {
-            // 1. Extract Requirements from File
             let inputPayload;
             if (uploadedFile.mimeType === 'application/pdf') {
                 inputPayload = { data: uploadedFile.data as string, mimeType: 'application/pdf' };
             } else {
                 inputPayload = uploadedFile.data as string;
             }
-            
             const extractedArtifacts = await extractRequirementsFromDocument(inputPayload);
             setPlmData(extractedArtifacts);
-            
             if (extractedArtifacts.length === 0) {
-                alert("No requirements found in the document. Please check the content.");
+                alert("No requirements found in the document.");
                 setStep(0);
                 setIsLoading(false);
                 return;
             }
-
-            // Proceed to Analysis
             await runAnalysis(extractedArtifacts);
-            
         } catch (e) {
-            console.error(e);
             alert("Failed to process document.");
             setStep(0);
         } finally {
@@ -146,14 +183,13 @@ const ComplianceAuditHub: React.FC = () => {
     const runAnalysis = async (artifacts: PLMDataArtifact[]) => {
         setStep(2);
         try {
-            // 2. Parse Regulation (Using Default for Demo)
             const parseRes = await parseRegulationDocument(DEFAULT_REGULATION_TEXT);
             setRegSegments(parseRes.segments);
-
-            // 3. Run Compliance Engine
             const results = await evaluateCompliance(parseRes.segments, artifacts);
             setAuditResult(results);
             setStep(3);
+            // We'll add to history here if report is null, then update history if report is generated later
+            addToHistory(results, null);
         } catch (e) {
             alert("Compliance Analysis Failed.");
             setStep(0);
@@ -166,6 +202,14 @@ const ComplianceAuditHub: React.FC = () => {
         try {
             const reportData = await generateCertificationReport(auditResult, "Compliance Audit Report");
             setReport(reportData);
+            // Update the latest history entry with the new report
+            setHistory(prev => {
+                const newHist = [...prev];
+                if (newHist.length > 0) {
+                    newHist[0].report = reportData;
+                }
+                return newHist;
+            });
             setActiveTab('REPORT');
         } catch (e) {
             alert("Report Generation Failed");
@@ -182,11 +226,8 @@ const ComplianceAuditHub: React.FC = () => {
         setActiveTab('OVERVIEW');
     };
 
-    // --- Sub Components ---
-
     const OverviewTab = () => (
         <div className="space-y-6 animate-in fade-in">
-            {/* Score Cards */}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                     <div>
@@ -229,7 +270,6 @@ const ComplianceAuditHub: React.FC = () => {
                 </div>
             </div>
 
-            {/* Traceability Matrix Visualization */}
             <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
                 <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                     <Layers className="w-5 h-5 text-blue-500" />
@@ -313,18 +353,14 @@ const ComplianceAuditHub: React.FC = () => {
             {report ? (
                 <div className="p-8 max-w-4xl mx-auto prose prose-slate prose-sm">
                     <div className="text-xs text-slate-400 mb-6 uppercase tracking-widest font-bold">Generated: {report.generatedDate}</div>
-                    
                     <h4 className="text-lg font-bold text-slate-900 mb-2">Executive Summary</h4>
                     <p className="text-slate-700 leading-relaxed mb-6 whitespace-pre-line">{report.executiveSummary}</p>
-                    
                     <h4 className="text-lg font-bold text-slate-900 mb-2">Compliance Matrix</h4>
                     <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 font-mono text-xs mb-6 whitespace-pre-wrap">
                         {report.complianceTable}
                     </div>
-
                     <h4 className="text-lg font-bold text-slate-900 mb-2">Gap Analysis & Corrective Actions</h4>
                     <p className="text-slate-700 leading-relaxed mb-6 whitespace-pre-line">{report.gapAnalysisSection}</p>
-
                     <div className="border-t border-slate-200 pt-6">
                         <h4 className="text-lg font-bold text-slate-900 mb-2">Conclusion</h4>
                         <p className="text-slate-800 font-medium italic">{report.conclusion}</p>
@@ -347,6 +383,16 @@ const ComplianceAuditHub: React.FC = () => {
         </div>
         <div className="flex gap-3">
              <button 
+                onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition-all ${
+                    isHistoryOpen ? 'bg-blue-600 text-white shadow-md' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+            >
+                <History className="w-4 h-4" /> 
+                History {history.length > 0 && `(${history.length})`}
+                {isHistoryOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+             <button 
                 onClick={reset}
                 className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium shadow-lg flex items-center gap-2 transition-all"
             >
@@ -355,38 +401,73 @@ const ComplianceAuditHub: React.FC = () => {
         </div>
       </header>
 
+      {/* History Collapsible Panel */}
+      {isHistoryOpen && (
+          <div className="bg-white border border-slate-200 rounded-xl shadow-md overflow-hidden animate-in slide-in-from-top-4 duration-300">
+              <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wider">
+                      <Clock className="w-4 h-4 text-slate-400" /> Recent Audits
+                  </h3>
+                  <button onClick={() => setHistory([])} className="text-xs text-red-500 font-medium hover:underline">Clear History</button>
+              </div>
+              <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                  {history.length === 0 ? (
+                      <div className="p-8 text-center text-slate-400 text-sm italic">No past audits recorded.</div>
+                  ) : (
+                      history.map((entry) => (
+                          <div key={entry.id} className="p-4 hover:bg-slate-50 transition-all flex items-center justify-between group">
+                              <div className="flex items-center gap-4">
+                                  <div className={`p-2 rounded-lg ${entry.score > 80 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                      <span className="text-sm font-black">{entry.score}%</span>
+                                  </div>
+                                  <div>
+                                      <p className="text-sm font-bold text-slate-800 truncate max-w-[200px]">{entry.title}</p>
+                                      <p className="text-[10px] text-slate-400 font-medium uppercase">{entry.date}</p>
+                                  </div>
+                              </div>
+                              <button 
+                                onClick={() => loadHistoryEntry(entry)}
+                                className="opacity-0 group-hover:opacity-100 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-blue-100 flex items-center gap-1"
+                              >
+                                  Restore Session <ArrowRight className="w-3 h-3" />
+                              </button>
+                          </div>
+                      ))
+                  )}
+              </div>
+          </div>
+      )}
+
       {/* Main Content Area */}
       {step === 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              {/* Option 1: Automated PLM */}
-              <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col items-center text-center">
-                  <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mb-6">
+              <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col items-center text-center group">
+                  <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mb-6 transition-transform group-hover:scale-110">
                       <Database className="w-8 h-8" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800">Automated PLM Audit</h3>
-                  <p className="text-slate-500 mt-2 mb-8 text-sm">
+                  <p className="text-slate-500 mt-2 mb-8 text-sm leading-relaxed">
                       Connect to Teamcenter/Windchill to automatically fetch live requirements and test cases for compliance checking.
                   </p>
                   <button 
                     onClick={runPLMAudit}
-                    className="mt-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-bold shadow-md w-full flex items-center justify-center gap-2"
+                    className="mt-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-bold shadow-md w-full flex items-center justify-center gap-2 transition-transform hover:translate-y-[-2px]"
                   >
                       <Share2 className="w-5 h-5" /> Connect PLM
                   </button>
               </div>
 
-              {/* Option 2: Manual Upload */}
-              <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col items-center text-center">
-                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-6">
+              <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col items-center text-center group">
+                  <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mb-6 transition-transform group-hover:scale-110">
                       <FileText className="w-8 h-8" />
                   </div>
                   <h3 className="text-xl font-bold text-slate-800">Manual Document Audit</h3>
-                  <p className="text-slate-500 mt-2 mb-8 text-sm">
+                  <p className="text-slate-500 mt-2 mb-8 text-sm leading-relaxed">
                       Upload a Requirements Specification (PDF, DOCX) to extract data and run a compliance check manually.
                   </p>
                   
                   {uploadedFile ? (
-                      <div className="w-full bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4 flex items-center justify-between">
+                      <div className="w-full bg-slate-50 p-4 rounded-lg border border-slate-200 mb-4 flex items-center justify-between animate-in zoom-in-95">
                           <div className="flex items-center gap-3 overflow-hidden">
                               <FileType className="w-5 h-5 text-emerald-600 flex-shrink-0" />
                               <div className="text-left overflow-hidden">
@@ -401,7 +482,7 @@ const ComplianceAuditHub: React.FC = () => {
                   {uploadedFile ? (
                        <button 
                         onClick={runManualAudit}
-                        className="mt-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-bold shadow-md w-full flex items-center justify-center gap-2"
+                        className="mt-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-lg font-bold shadow-md w-full flex items-center justify-center gap-2 transition-transform hover:translate-y-[-2px]"
                       >
                           <CheckCircle className="w-5 h-5" /> Run Audit
                       </button>
@@ -416,7 +497,7 @@ const ComplianceAuditHub: React.FC = () => {
                         />
                         <button 
                             onClick={() => fileInputRef.current?.click()}
-                            className="mt-auto bg-white border-2 border-slate-200 hover:border-emerald-500 hover:text-emerald-600 text-slate-600 px-6 py-3 rounded-lg font-bold w-full flex items-center justify-center gap-2 transition-all"
+                            className="mt-auto bg-white border-2 border-slate-200 hover:border-emerald-500 hover:text-emerald-600 text-slate-600 px-6 py-3 rounded-lg font-bold w-full flex items-center justify-center gap-2 transition-all shadow-sm hover:shadow-md"
                         >
                             <Upload className="w-5 h-5" /> Upload File
                         </button>
@@ -426,15 +507,14 @@ const ComplianceAuditHub: React.FC = () => {
           </div>
       ) : (
           <>
-            {/* Tabs */}
-            <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit">
+            <div className="flex gap-1 bg-slate-100 p-1 rounded-lg w-fit shadow-inner">
                 {(['OVERVIEW', 'GAPS', 'REPORT'] as const).map(tab => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab)}
-                        className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                        className={`px-6 py-2 rounded-md text-sm font-bold transition-all ${
                             activeTab === tab 
-                            ? 'bg-white text-slate-800 shadow-sm' 
+                            ? 'bg-white text-blue-600 shadow-md transform scale-105 z-10' 
                             : 'text-slate-500 hover:text-slate-700'
                         }`}
                     >
@@ -445,16 +525,15 @@ const ComplianceAuditHub: React.FC = () => {
                 ))}
             </div>
 
-            {/* Tab Content */}
             <div className="min-h-[400px]">
                 {isLoading && step < 3 ? (
                     <div className="flex flex-col items-center justify-center h-64">
                         <Loader2 className="w-12 h-12 text-blue-600 animate-spin mb-4" />
-                        <h3 className="text-lg font-semibold text-slate-700">
-                            {step === 1 ? "Extracting Data..." : "Running AI Compliance Checks..."}
+                        <h3 className="text-lg font-black text-slate-700 uppercase tracking-widest">
+                            {step === 1 ? "Extracting Data..." : "Analyzing Compliance..."}
                         </h3>
-                        <p className="text-slate-400">
-                            {step === 1 ? "Analyzing document structure and requirements" : "Analyzing traceability and evidence coverage"}
+                        <p className="text-slate-400 text-sm mt-1">
+                            {step === 1 ? "Analyzing document structure and requirements..." : "Analyzing traceability and evidence coverage..."}
                         </p>
                     </div>
                 ) : (
@@ -464,18 +543,23 @@ const ComplianceAuditHub: React.FC = () => {
                         {activeTab === 'REPORT' && (
                             <div className="space-y-4">
                                 {!report && (
-                                     <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-xl flex items-center justify-between">
-                                        <div>
-                                            <h4 className="font-bold text-indigo-900">Ready to Generate?</h4>
-                                            <p className="text-indigo-700 text-sm mt-1">Create a formal PDF-ready certification document from these results.</p>
+                                     <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-xl flex items-center justify-between shadow-sm animate-in fade-in">
+                                        <div className="flex items-center gap-4">
+                                            <div className="p-3 bg-indigo-100 rounded-xl">
+                                                <Sparkles className="w-6 h-6 text-indigo-600" />
+                                            </div>
+                                            <div>
+                                                <h4 className="font-bold text-indigo-900">Ready to Generate Final Artifacts?</h4>
+                                                <p className="text-indigo-700 text-sm mt-0.5">Create a formal PDF-ready certification document from these results.</p>
+                                            </div>
                                         </div>
                                         <button 
                                             onClick={handleGenerateReport}
                                             disabled={isLoading}
-                                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-lg font-bold shadow flex items-center gap-2"
+                                            className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-xl font-bold shadow-lg flex items-center gap-2 transition-all transform hover:scale-105 active:scale-95"
                                         >
-                                            {isLoading ? <Loader2 className="animate-spin w-4 h-4"/> : <FileText className="w-4 h-4" />}
-                                            Generate Document
+                                            {isLoading ? <Loader2 className="animate-spin w-5 h-5"/> : <FileText className="w-5 h-5" />}
+                                            Generate Report
                                         </button>
                                      </div>
                                 )}
@@ -490,5 +574,23 @@ const ComplianceAuditHub: React.FC = () => {
     </div>
   );
 };
+
+const Sparkles = ({ className }: { className?: string }) => (
+    <svg 
+        xmlns="http://www.w3.org/2000/svg" 
+        width="24" 
+        height="24" 
+        viewBox="0 0 24 24" 
+        fill="none" 
+        stroke="currentColor" 
+        strokeWidth="2" 
+        strokeLinecap="round" 
+        strokeLinejoin="round" 
+        className={className}
+    >
+        <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/>
+        <path d="M5 3v4"/><path d="M19 17v4"/><path d="M3 5h4"/><path d="M17 19h4"/>
+    </svg>
+);
 
 export default ComplianceAuditHub;

@@ -1,9 +1,10 @@
-import React, { useState, useRef } from 'react';
+
+import React, { useState, useRef, useEffect } from 'react';
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
-import { parseRegulationDocument } from '../services/geminiService';
+import { parseRegulationDocument, semanticSearchRegulations } from '../services/geminiService';
 import { RegulationPipelineResult, ProcessedSegment } from '../types';
-import { Network, Upload, FileText, ArrowRight, BookOpen, AlertCircle, CheckSquare, Layers, Database, Cpu, FileJson, Tag, Loader2, ChevronDown, ChevronUp, Eye, EyeOff, ShieldAlert, FileType, X } from 'lucide-react';
+import { Network, Upload, FileText, ArrowRight, BookOpen, AlertCircle, CheckSquare, Layers, Database, Cpu, FileJson, Tag, Loader2, ChevronDown, ChevronUp, Eye, EyeOff, ShieldAlert, FileType, X, AlertTriangle, Sparkles, Search, Library, Trash2 } from 'lucide-react';
 
 const DEFAULT_TEXT = `CS-25.1309 Equipment, systems and installations.
 (a) The equipment, systems, and installations whose functioning is required by this Subpart, must be designed to ensure that they perform their intended functions under any foreseeable operating condition.
@@ -175,83 +176,109 @@ const SegmentDisplay: React.FC<{ segment: ProcessedSegment }> = ({ segment }) =>
 };
 
 const RegulationParser: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'INGEST' | 'LIBRARY'>('INGEST');
   const [inputText, setInputText] = useState(DEFAULT_TEXT);
   const [binaryFile, setBinaryFile] = useState<{ name: string; size: number; mimeType: string; data: string } | null>(null);
   const [result, setResult] = useState<RegulationPipelineResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [activeStep, setActiveStep] = useState<number>(-1);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Library State (Mock Vector DB)
+  const [library, setLibrary] = useState<ProcessedSegment[]>(() => {
+      const saved = localStorage.getItem('aero_reg_library');
+      return saved ? JSON.parse(saved) : [];
+  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ProcessedSegment[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
+  useEffect(() => {
+      localStorage.setItem('aero_reg_library', JSON.stringify(library));
+  }, [library]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Reset previous inputs
+    setError(null);
     setBinaryFile(null);
     setInputText('');
     setResult(null);
+    setActiveStep(-1);
 
     const fileName = file.name.toLowerCase();
 
-    // 1. Handle PDF (Binary)
-    if (file.type === 'application/pdf' || fileName.endsWith('.pdf')) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            const base64 = (ev.target?.result as string).split(',')[1]; // Remove data URL prefix
-            setBinaryFile({
-                name: file.name,
-                size: file.size,
-                mimeType: 'application/pdf',
-                data: base64
-            });
-        };
-        reader.readAsDataURL(file);
-    } 
-    // 2. Handle DOCX (Text Extraction)
-    else if (fileName.endsWith('.docx')) {
-        try {
-            const arrayBuffer = await file.arrayBuffer();
-            const result = await mammoth.extractRawText({ arrayBuffer });
-            setInputText(result.value);
-        } catch (err) {
-            alert("Error parsing DOCX file.");
-        }
+    if (file.size > 20 * 1024 * 1024) {
+        setError("File size exceeds 20MB limit. Please upload a smaller document.");
+        e.target.value = '';
+        return;
     }
-    // 3. Handle XLSX/XLS (Text Extraction)
-    else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
-        try {
+
+    try {
+        if (file.type === 'application/pdf' || fileName.endsWith('.pdf')) {
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const base64 = (ev.target?.result as string).split(',')[1];
+                setBinaryFile({
+                    name: file.name,
+                    size: file.size,
+                    mimeType: 'application/pdf',
+                    data: base64
+                });
+            };
+            reader.onerror = () => setError("Failed to read the PDF file.");
+            reader.readAsDataURL(file);
+        } 
+        else if (fileName.endsWith('.docx')) {
+            const arrayBuffer = await file.arrayBuffer();
+            const res = await mammoth.extractRawText({ arrayBuffer });
+            if (!res.value.trim()) throw new Error("Document appears to be empty.");
+            setInputText(res.value);
+        }
+        else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
             const arrayBuffer = await file.arrayBuffer();
             const workbook = XLSX.read(arrayBuffer);
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
             const csvData = XLSX.utils.sheet_to_csv(worksheet);
+            if (!csvData.trim()) throw new Error("Spreadsheet appears to be empty.");
             setInputText(csvData);
-        } catch (err) {
-            alert("Error parsing Excel file.");
         }
-    }
-    // 4. Handle JSON/Text/XML (Raw Read)
-    else {
-        try {
+        else {
             const text = await file.text();
+            if (!text.trim()) throw new Error("File appears to be empty.");
             setInputText(text);
-        } catch (err) {
-            alert("Error reading text file.");
         }
+    } catch (err: any) {
+        setError(err.message || "An error occurred while reading the file.");
+        console.error(err);
     }
 
-    // Reset input so same file can be selected again
     e.target.value = '';
-  };
-
-  const handleClearFile = () => {
-    setBinaryFile(null);
-    setInputText('');
   };
 
   const handleParse = async () => {
     if (!inputText && !binaryFile) return;
+    
+    if (process.env.API_KEY === "__API_KEY__") {
+        setError("API Key is not configured. Please ensure the API_KEY environment variable is set in your deployment.");
+        return;
+    }
+
     setIsLoading(true);
     setResult(null);
+    setError(null);
+    setActiveStep(0);
+
+    const progressInterval = setInterval(() => {
+        setActiveStep((prev) => {
+            if (prev < 2) return prev + 1;
+            return prev;
+        });
+    }, 2000);
+
     try {
       let payload;
       if (binaryFile) {
@@ -260,131 +287,264 @@ const RegulationParser: React.FC = () => {
         payload = inputText;
       }
       const pipelineResult = await parseRegulationDocument(payload);
-      setResult(pipelineResult);
-    } catch (e) {
-      alert("Failed to process document through the pipeline. Please check the API key and file format.");
-      console.error(e);
-    } finally {
+      
+      clearInterval(progressInterval);
+      setActiveStep(3);
+      
+      setTimeout(() => {
+          setResult(pipelineResult);
+          // Auto-index into library
+          setLibrary(prev => {
+              const existingIds = new Set(prev.map(s => s.id));
+              const newSegments = pipelineResult.segments.filter(s => !existingIds.has(s.id));
+              return [...prev, ...newSegments];
+          });
+          setIsLoading(false);
+          setActiveStep(-1);
+      }, 500);
+
+    } catch (e: any) {
+      clearInterval(progressInterval);
+      setActiveStep(-1);
+      setError(e.message || "Pipeline processing failed.");
       setIsLoading(false);
     }
   };
 
-  const PipelineStep = ({ title, icon, color }: { title: string, icon: React.ReactNode, color: string }) => (
-    <div className="flex flex-col items-center gap-2 relative z-10">
-        <div className={`w-12 h-12 rounded-full ${color} text-white flex items-center justify-center shadow-lg`}>
-            {icon}
-        </div>
-        <span className="text-xs font-bold text-slate-600 uppercase tracking-wide text-center">{title}</span>
-    </div>
-  );
+  const handleSearch = async () => {
+      if (!searchQuery.trim() || library.length === 0) return;
+      setIsSearching(true);
+      try {
+          const results = await semanticSearchRegulations(searchQuery, library);
+          setSearchResults(results);
+      } catch (e) {
+          alert("Semantic search failed.");
+      } finally {
+          setIsSearching(false);
+      }
+  };
 
-  const PipelineConnector = () => (
-      <div className="hidden md:block h-1 bg-slate-200 flex-1 mx-2 relative top-[-14px]"></div>
-  );
+  const clearLibrary = () => {
+      if (confirm("Clear all indexed regulations?")) {
+          setLibrary([]);
+          setSearchResults(null);
+      }
+  };
+
+  const PipelineStep = ({ title, icon, index }: { title: string, icon: React.ReactNode, index: number }) => {
+    const isCompleted = index < activeStep;
+    const isActive = index === activeStep;
+    const colorClass = isActive ? "bg-blue-600 text-white animate-pulse" : isCompleted ? "bg-emerald-500 text-white" : "bg-slate-200 text-slate-400";
+
+    return (
+        <div className="flex flex-col items-center gap-2 relative z-10">
+            <div className={`w-14 h-14 rounded-full ${colorClass} flex items-center justify-center shadow-lg transition-all duration-500`}>
+                {isCompleted ? <CheckSquare className="w-6 h-6" /> : isActive ? <Loader2 className="w-6 h-6 animate-spin" /> : icon}
+            </div>
+            <span className={`text-[10px] font-black uppercase tracking-widest text-center ${isActive ? 'text-blue-600' : isCompleted ? 'text-emerald-600' : 'text-slate-400'}`}>
+                {title}
+            </span>
+        </div>
+    );
+  };
 
   return (
     <div className="space-y-8">
-       <header>
-        <h2 className="text-3xl font-bold text-slate-900">Regulatory Ingestion Pipeline</h2>
-        <p className="text-slate-500 mt-2">Ingest, Normalize, Chunk, and Interpret Regulatory Documents (PDF, DOCX, XML)</p>
-      </header>
-
-      {/* Input Section */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-            <label className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                <BookOpen className="w-4 h-4 text-blue-500" />
-                Raw Document Source
-            </label>
-             <div className="flex gap-2">
-                <input 
-                    type="file" 
-                    ref={fileInputRef} 
-                    onChange={handleFileUpload}
-                    accept=".pdf,.docx,.doc,.xlsx,.xls,.txt,.md,.json,.csv,.xml,.html" 
-                    className="hidden" 
-                />
-                <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors"
-                >
-                    <Upload className="w-3.5 h-3.5" />
-                    Upload File (PDF/DOCX/XML)
-                </button>
+       <header className="flex justify-between items-center">
+        <div className="flex items-center gap-4">
+            <div className="p-3 bg-blue-100 text-blue-600 rounded-2xl">
+                <Network className="w-8 h-8" />
+            </div>
+            <div>
+                <h2 className="text-3xl font-bold text-slate-900">Regulation Engine</h2>
+                <p className="text-slate-500 mt-1">Ingest, Interpret, and Semantic Indexing Pipeline</p>
             </div>
         </div>
-
-        {/* Dynamic Input Area: Text Editor or File Card */}
-        {binaryFile ? (
-            <div className="w-full h-40 p-4 bg-slate-50 rounded-lg border border-slate-200 flex flex-col items-center justify-center relative">
-                <button 
-                    onClick={handleClearFile} 
-                    className="absolute top-2 right-2 p-1 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
-                    title="Remove File"
-                >
-                    <X className="w-4 h-4" />
-                </button>
-                <div className="w-12 h-12 bg-red-100 text-red-500 rounded-lg flex items-center justify-center mb-3">
-                    <FileType className="w-6 h-6" />
-                </div>
-                <h4 className="font-semibold text-slate-800">{binaryFile.name}</h4>
-                <p className="text-xs text-slate-500 mt-1">{(binaryFile.size / 1024).toFixed(1)} KB • PDF Document</p>
-                <p className="text-xs text-emerald-600 font-medium mt-2 flex items-center gap-1">
-                    <CheckSquare className="w-3 h-3" /> Ready for AI Analysis
-                </p>
-            </div>
-        ) : (
-            <textarea
-                className="w-full h-40 p-4 font-mono text-sm bg-slate-50 text-slate-800 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 outline-none resize-y"
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Paste regulatory text here or upload a file..."
-            />
-        )}
-        
-        {/* Visual Pipeline Indicator */}
-        <div className="mt-8 mb-4 flex items-center justify-between px-4 md:px-12">
-            <PipelineStep title="Ingest" icon={<FileText className="w-5 h-5"/>} color="bg-slate-500" />
-            <PipelineConnector />
-            <PipelineStep title="Split & Chunk" icon={<Layers className="w-5 h-5"/>} color="bg-blue-500" />
-            <PipelineConnector />
-            <PipelineStep title="Normalize" icon={<CheckSquare className="w-5 h-5"/>} color="bg-indigo-500" />
-            <PipelineConnector />
-            <PipelineStep title="Interpret" icon={<Cpu className="w-5 h-5"/>} color="bg-emerald-500" />
-        </div>
-
-        <div className="mt-6 flex justify-center">
-            <button
-                onClick={handleParse}
-                disabled={isLoading || (!inputText && !binaryFile)}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-8 py-3 rounded-lg font-bold shadow-lg flex items-center gap-2 disabled:opacity-50 transition-all transform hover:scale-105"
+        <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
+            <button 
+                onClick={() => setActiveTab('INGEST')}
+                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'INGEST' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
             >
-                {isLoading ? <Loader2 className="animate-spin" /> : <Database />}
-                Run Ingestion & Interpretation Model
+                Pipeline
+            </button>
+            <button 
+                onClick={() => setActiveTab('LIBRARY')}
+                className={`px-4 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'LIBRARY' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+            >
+                Semantic Library ({library.length})
             </button>
         </div>
-      </div>
+      </header>
 
-      {/* Results Section */}
-      {result && (
+      {activeTab === 'INGEST' ? (
+          <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-xl relative overflow-hidden">
+            {isLoading && (
+                <div className="absolute top-0 left-0 w-full h-1 bg-slate-100 overflow-hidden">
+                    <div className="h-full bg-blue-600 animate-progress origin-left w-full"></div>
+                </div>
+            )}
+
+            <div className="flex justify-between items-center mb-6">
+                <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-blue-500" />
+                    Ingestion Source
+                </label>
+                <div className="flex gap-2">
+                    <input type="file" ref={fileInputRef} onChange={handleFileUpload} className="hidden" />
+                    <button onClick={() => fileInputRef.current?.click()} className="flex items-center gap-1.5 px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-all">
+                        <Upload className="w-4 h-4" /> Upload File
+                    </button>
+                </div>
+            </div>
+
+            {binaryFile ? (
+                <div className="w-full h-48 p-4 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center relative">
+                    <button onClick={() => setBinaryFile(null)} className="absolute top-4 right-4 p-2 hover:bg-red-50 hover:text-red-500 rounded-xl text-slate-400 border border-slate-100"><X className="w-5 h-5" /></button>
+                    <div className="w-16 h-16 bg-red-100 text-red-500 rounded-2xl flex items-center justify-center mb-4"><FileType className="w-8 h-8" /></div>
+                    <h4 className="font-bold text-slate-800">{binaryFile.name}</h4>
+                    <p className="text-xs text-slate-500 mt-1 uppercase tracking-widest font-bold">PDF Document Indexed</p>
+                </div>
+            ) : (
+                <textarea
+                    className="w-full h-48 p-6 font-mono text-sm bg-slate-50 text-slate-800 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none resize-none transition-all"
+                    value={inputText}
+                    readOnly={isLoading}
+                    onChange={(e) => setInputText(e.target.value)}
+                    placeholder="Paste regulatory text here..."
+                />
+            )}
+
+            {error && (
+                <div className="mt-6 p-5 bg-red-50 border border-red-100 rounded-2xl flex items-start gap-4">
+                    <AlertTriangle className="w-6 h-6 text-red-600" />
+                    <div>
+                        <h5 className="text-sm font-black text-red-800 uppercase tracking-widest">Pipeline Error</h5>
+                        <p className="text-sm text-red-700 mt-1">{error}</p>
+                    </div>
+                </div>
+            )}
+            
+            <div className="mt-12 mb-8 flex items-center justify-between px-4 md:px-16 lg:px-24">
+                <PipelineStep index={0} title="Ingest" icon={<FileText className="w-6 h-6"/>} />
+                <div className="hidden md:block h-1 bg-slate-200 flex-1 mx-2 relative top-[-16px] rounded-full" />
+                <PipelineStep index={1} title="Split & Chunk" icon={<Layers className="w-6 h-6"/>} />
+                <div className="hidden md:block h-1 bg-slate-200 flex-1 mx-2 relative top-[-16px] rounded-full" />
+                <PipelineStep index={2} title="Normalize" icon={<CheckSquare className="w-6 h-6"/>} />
+                <div className="hidden md:block h-1 bg-slate-200 flex-1 mx-2 relative top-[-16px] rounded-full" />
+                <PipelineStep index={3} title="Semantic Index" icon={<Database className="w-6 h-6"/>} />
+            </div>
+
+            <div className="mt-10 flex justify-center">
+                <button
+                    onClick={handleParse}
+                    disabled={isLoading || (!inputText && !binaryFile)}
+                    className="bg-slate-900 hover:bg-black text-white px-10 py-4 rounded-2xl font-black shadow-2xl flex items-center gap-3 transition-all transform hover:scale-105"
+                >
+                    {isLoading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Sparkles className="w-6 h-6 text-blue-400" />}
+                    Run AI Ingestion Pipeline
+                </button>
+            </div>
+          </div>
+      ) : (
+          <div className="space-y-6 animate-in fade-in slide-in-from-top-4">
+              <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xl">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <Library className="w-6 h-6 text-blue-600" />
+                        Regulatory Semantic Library
+                    </h3>
+                    <button onClick={clearLibrary} className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1">
+                        <Trash2 className="w-3.5 h-3.5" /> Clear Index
+                    </button>
+                  </div>
+                  
+                  <div className="relative group">
+                      <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                          <Search className="w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                      </div>
+                      <input 
+                        type="text" 
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                        placeholder="Natural Language Query (e.g., 'What are the rules for failure probability in CS-25?')"
+                        className="w-full pl-12 pr-32 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-inner"
+                      />
+                      <button 
+                        onClick={handleSearch}
+                        disabled={isSearching || !searchQuery.trim()}
+                        className="absolute right-2 top-2 bottom-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-md transition-all disabled:opacity-50"
+                      >
+                          {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Semantic Search'}
+                      </button>
+                  </div>
+              </div>
+
+              {/* Search Results */}
+              <div className="space-y-6">
+                  {searchResults ? (
+                      <>
+                        <div className="flex items-center justify-between">
+                            <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                                <Search className="w-4 h-4" /> Top Semantic Matches
+                            </h4>
+                            <button onClick={() => setSearchResults(null)} className="text-xs text-blue-600 font-bold">View All Library</button>
+                        </div>
+                        {searchResults.length === 0 ? (
+                            <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-400 italic">No semantic matches found in library.</div>
+                        ) : (
+                            searchResults.map(s => <SegmentDisplay key={s.id} segment={s} />)
+                        )}
+                      </>
+                  ) : library.length > 0 ? (
+                      <>
+                        <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
+                            <Database className="w-4 h-4" /> All Indexed Segments
+                        </h4>
+                        {library.map(s => <SegmentDisplay key={s.id} segment={s} />)}
+                      </>
+                  ) : (
+                      <div className="p-12 text-center bg-slate-100 rounded-2xl border-2 border-dashed border-slate-200">
+                          <Database className="w-12 h-12 text-slate-300 mx-auto mb-4" />
+                          <h3 className="text-lg font-bold text-slate-400">Library Empty</h3>
+                          <p className="text-sm text-slate-400 mt-2">Use the Pipeline to ingest and semantic-index regulatory documents.</p>
+                      </div>
+                  )}
+              </div>
+          </div>
+      )}
+
+      {activeTab === 'INGEST' && result && (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
             <div className="flex items-center justify-between">
-                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                    <FileJson className="w-6 h-6 text-emerald-600" />
+                <h3 className="text-2xl font-black text-slate-800 flex items-center gap-3">
+                    <FileJson className="w-8 h-8 text-emerald-600" />
                     Interpretation Model Output: {result.documentTitle}
                 </h3>
-                <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-3 py-1 rounded-full border border-emerald-200">
-                    {result.segments.length} Semantic Segments
-                </span>
+                <div className="flex items-center gap-2 bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-widest px-4 py-2 rounded-full border border-emerald-200">
+                    <Layers className="w-3.5 h-3.5" />
+                    {result.segments.length} Semantic Segments Indexed
+                </div>
             </div>
             
-            <div className="grid gap-6">
+            <div className="grid gap-8">
                 {result.segments.map((segment) => (
                     <SegmentDisplay key={segment.id} segment={segment} />
                 ))}
             </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes progress {
+            0% { transform: scaleX(0); }
+            50% { transform: scaleX(0.7); }
+            100% { transform: scaleX(0.95); }
+        }
+        .animate-progress {
+            animation: progress 15s ease-out forwards;
+        }
+      `}</style>
     </div>
   );
 };
