@@ -1,3 +1,4 @@
+
 import React, { useState, useRef } from 'react';
 import { reconcileBOMs } from '../services/geminiService';
 import { BOMItem, BOMDiscrepancy } from '../types';
@@ -159,7 +160,7 @@ const BOMReconciliation: React.FC = () => {
             </div>
           </div>
           <textarea
-            className="h-64 p-4 font-mono text-xs bg-slate-900 text-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            className="h-64 p-4 font-mono text-xs bg-white text-slate-900 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none shadow-inner"
             value={designBOMStr}
             onChange={(e) => setDesignBOMStr(e.target.value)}
             placeholder='[ { "partNumber": "..." } ]'
@@ -188,7 +189,7 @@ const BOMReconciliation: React.FC = () => {
             </div>
           </div>
           <textarea
-            className="h-64 p-4 font-mono text-xs bg-slate-900 text-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            className="h-64 p-4 font-mono text-xs bg-white text-slate-900 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none shadow-inner"
             value={builtBOMStr}
             onChange={(e) => setBuiltBOMStr(e.target.value)}
             placeholder='[ { "partNumber": "..." } ]'

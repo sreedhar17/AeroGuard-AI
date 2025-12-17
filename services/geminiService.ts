@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { BOMItem, BOMDiscrepancy, RegulatoryImpact, RegulationPipelineResult, PLMDataArtifact, ProcessedSegment, ComplianceAuditResult, CertificationReport, ChangeManagerResult, EngineeringOrder } from "../types";
+import { BOMItem, BOMDiscrepancy, RegulatoryImpact, RegulationPipelineResult, PLMDataArtifact, ProcessedSegment, ComplianceAuditResult, CertificationReport, ChangeManagerResult, EngineeringOrder, ECNDetail } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -12,7 +12,7 @@ export const analyzeChangeRequest = async (
   ebomContext: string,
   parallelChanges: any[]
 ): Promise<ChangeManagerResult> => {
-    // Using gemini-3-flash-preview for higher quota limits and faster processing
+    // Using gemini-3-flash-preview for high performance and speed
     const model = "gemini-3-flash-preview";
     
     const prompt = `
@@ -53,8 +53,8 @@ export const analyzeChangeRequest = async (
             model,
             contents: prompt,
             config: {
-                // Lower budget to prevent runaway thinking causing token exhaustion
-                thinkingConfig: { thinkingBudget: 1000 },
+                // Disable thinking budget for maximum speed on flash model
+                thinkingConfig: { thinkingBudget: 0 },
                 responseMimeType: "application/json",
                 responseSchema: {
                     type: Type.OBJECT,
@@ -175,6 +175,39 @@ export const analyzeChangeRequest = async (
         throw new Error("Triage Pipeline Failure: " + (err.message || "Unknown error"));
     }
     throw new Error("Triage failed: No response text");
+};
+
+export const fetchECNDetails = async (ecnId: string): Promise<ECNDetail> => {
+    const model = "gemini-3-flash-preview";
+    const prompt = `Provide detailed mock implementation data for Aviation ECN: "${ecnId}". 
+    Focus on the "Solution Implemented" and "Approver" fields. 
+    Ensure the output is JSON format with the following fields: 
+    id, title, solution, approver, approvalDate, impactedDocs (array).`;
+
+    const response = await ai.models.generateContent({
+        model,
+        contents: prompt,
+        config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                    id: { type: Type.STRING },
+                    title: { type: Type.STRING },
+                    solution: { type: Type.STRING },
+                    approver: { type: Type.STRING },
+                    approvalDate: { type: Type.STRING },
+                    impactedDocs: { type: Type.ARRAY, items: { type: Type.STRING } }
+                },
+                required: ['id', 'title', 'solution', 'approver', 'approvalDate', 'impactedDocs']
+            }
+        }
+    });
+
+    if (response.text) {
+        return JSON.parse(response.text) as ECNDetail;
+    }
+    throw new Error("Failed to fetch ECN details");
 };
 
 export const reconcileBOMs = async (asDesigned: BOMItem[], asBuilt: BOMItem[]): Promise<BOMDiscrepancy[]> => {

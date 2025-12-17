@@ -406,7 +406,7 @@ const RegulationParser: React.FC = () => {
                 </div>
             ) : (
                 <textarea
-                    className="w-full h-48 p-6 font-mono text-sm bg-slate-50 text-slate-800 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none resize-none transition-all"
+                    className="w-full h-48 p-6 font-mono text-sm bg-slate-50 text-slate-900 rounded-2xl border border-slate-200 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none resize-none transition-all"
                     value={inputText}
                     readOnly={isLoading}
                     onChange={(e) => setInputText(e.target.value)}
@@ -468,7 +468,7 @@ const RegulationParser: React.FC = () => {
                         onChange={(e) => setSearchQuery(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                         placeholder="Natural Language Query (e.g., 'What are the rules for failure probability in CS-25?')"
-                        className="w-full pl-12 pr-32 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-inner"
+                        className="w-full pl-12 pr-32 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-inner"
                       />
                       <button 
                         onClick={handleSearch}

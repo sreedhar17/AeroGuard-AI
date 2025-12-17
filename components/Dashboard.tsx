@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { AlertTriangle, CheckCircle, FileText, Activity, ArrowRight } from 'lucide-react';
@@ -92,13 +93,13 @@ const Dashboard: React.FC<DashboardProps> = ({ onNavigate }) => {
         />
 
         <MetricCard 
-          title="Pending CRs" 
-          value="8" 
-          subtext={<p className="text-xs text-slate-500">Awaiting CCB Review</p>}
+          title="Change Requests" 
+          value="12" 
+          subtext={<p className="text-xs text-slate-500">Active Change Pipeline</p>}
           icon={FileText}
           iconColor="text-blue-600"
           bgColor="bg-blue-50"
-          targetView={AppView.CCB_ASSISTANT}
+          targetView={AppView.CM_ASSISTANT}
         />
 
         <MetricCard 

@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { AppView } from '../types';
 import { 
@@ -28,7 +29,7 @@ const Layout: React.FC<LayoutProps> = ({ currentView, setCurrentView, children }
     { view: AppView.COMPLIANCE_HUB, label: 'Compliance & Audit', icon: ClipboardCheck },
     { view: AppView.BOM_RECONCILIATION, label: 'BOM Reconciliation', icon: GitCompare },
     { view: AppView.REGULATORY_ALERTS, label: 'Regulatory Watch', icon: Radio },
-    { view: AppView.CCB_ASSISTANT, label: 'CCB Assistant', icon: FileText },
+    { view: AppView.CM_ASSISTANT, label: 'CM Assistant', icon: FileText },
     { view: AppView.VIRTUAL_AUDITOR, label: 'Virtual Auditor', icon: ShieldCheck },
   ];
 

@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { auditorChat } from '../services/geminiService';
 import { ChatMessage } from '../types';
@@ -119,7 +120,7 @@ const VirtualAuditor: React.FC = () => {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleSend()}
                     placeholder="Ask about compliance gaps (e.g., 'Does my tool calibration log meet AS9100 Rev D Section 7.1.5?')"
-                    className="w-full pl-4 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-slate-700 placeholder:text-slate-400"
+                    className="w-full pl-4 pr-12 py-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-slate-900 placeholder:text-slate-400"
                 />
                 <button 
                     onClick={handleSend}

@@ -3,7 +3,7 @@ export enum AppView {
   DASHBOARD = 'DASHBOARD',
   BOM_RECONCILIATION = 'BOM_RECONCILIATION',
   REGULATORY_ALERTS = 'REGULATORY_ALERTS',
-  CCB_ASSISTANT = 'CCB_ASSISTANT',
+  CM_ASSISTANT = 'CM_ASSISTANT',
   VIRTUAL_AUDITOR = 'VIRTUAL_AUDITOR',
   REGULATION_PARSER = 'REGULATION_PARSER',
   COMPLIANCE_HUB = 'COMPLIANCE_HUB',
@@ -53,6 +53,15 @@ export interface EngineeringOrder {
   instructions: string[];
   partsRequired: string[];
   manHours: number;
+}
+
+export interface ECNDetail {
+  id: string;
+  title: string;
+  solution: string;
+  approver: string;
+  approvalDate: string;
+  impactedDocs: string[];
 }
 
 export interface ChangeImpact {

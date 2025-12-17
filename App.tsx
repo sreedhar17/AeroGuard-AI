@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
@@ -24,7 +25,7 @@ const App: React.FC = () => {
         return <ComplianceAuditHub />;
       case AppView.REGULATORY_ALERTS:
         return <RegulatoryAlerts />;
-      case AppView.CCB_ASSISTANT:
+      case AppView.CM_ASSISTANT:
         return <CCBAssistant />;
       case AppView.VIRTUAL_AUDITOR:
         return <VirtualAuditor />;
