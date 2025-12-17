@@ -1,0 +1,5 @@
+{
+  "name": "AeroGuard AI",
+  "description": "A Digital Airworthiness Guardrail assistant for aviation compliance. Features As-Designed vs. As-Built BOM reconciliation, automated regulatory impact analysis, predictive change management (CCB), and virtual audit preparation using Gemini AI.",
+  "requestFramePermissions": []
+}
