@@ -1,0 +1,36 @@
+
+steps:
+  # 1. Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: 
+      - 'build'
+      - '--build-arg'
+      - 'API_KEY=${_API_KEY}'
+      - '-t'
+      - 'europe-west3-docker.pkg.dev/$PROJECT_ID/aeroguard-repo/aeroguard-app'
+      - '.'
+
+  # 2. Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'aeroguard-compliance-service'
+      - '--image'
+      - 'europe-west3-docker.pkg.dev/$PROJECT_ID/aeroguard-repo/aeroguard-app'
+      - '--region'
+      - 'europe-west3'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+
+# List the images to be pushed to the registry automatically
+images:
+  - 'europe-west3-docker.pkg.dev/$PROJECT_ID/aeroguard-repo/aeroguard-app'
+
+substitutions:
+  _API_KEY: 'AIzaSyCi5a5zzTDUvXSwE5FNUN4q-Nedsm1TL48'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
