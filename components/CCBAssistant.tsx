@@ -183,6 +183,7 @@ const CMAssistant: React.FC = () => {
     // ECN Details State
     const [selectedECNDetail, setSelectedECNDetail] = useState<ECNDetail | null>(null);
     const [isFetchingECN, setIsFetchingECN] = useState(false);
+    const [ecnError, setEcnError] = useState<string | null>(null);
 
     // Scheduling State
     const [isScheduling, setIsScheduling] = useState(false);
@@ -209,6 +210,7 @@ const CMAssistant: React.FC = () => {
         setIsLoading(true);
         setPipelineStage(1);
         setIsScheduling(false);
+        setEcnError(null);
 
         try {
             // Optimized: Drastically reduced UI delays for snappier performance
@@ -244,11 +246,12 @@ const CMAssistant: React.FC = () => {
 
     const handleECNClick = async (ecnId: string) => {
         setIsFetchingECN(true);
+        setEcnError(null);
         try {
             const detail = await fetchECNDetails(ecnId);
             setSelectedECNDetail(detail);
-        } catch (e) {
-            alert("Failed to retrieve ECN record from PLM.");
+        } catch (e: any) {
+            setEcnError(`Digital thread synchronization failed for ${ecnId}. The requested PLM record is currently unavailable in the vault.`);
         } finally {
             setIsFetchingECN(false);
         }
@@ -272,7 +275,7 @@ const CMAssistant: React.FC = () => {
                 </div>
                 {selectedECR && (
                     <button 
-                        onClick={() => { setSelectedECR(null); setAnalysis(null); setError(null); setSelectedECNDetail(null); }}
+                        onClick={() => { setSelectedECR(null); setAnalysis(null); setError(null); setSelectedECNDetail(null); setEcnError(null); }}
                         className="px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-xl text-xs font-bold text-slate-600 flex items-center gap-2 transition-all border border-slate-200"
                     >
                         <Inbox className="w-4 h-4" /> Back to Change Inbox
@@ -557,6 +560,20 @@ const CMAssistant: React.FC = () => {
                                         {selectedECR.ecns && selectedECR.ecns.length > 0 && (
                                             <div className="pt-6 border-t border-slate-100 space-y-4">
                                                 <h5 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><FileText className="w-4 h-4 text-emerald-600" /> Linked ECNs (PLM Records)</h5>
+                                                
+                                                {/* User-friendly ECN Fetch Error Message */}
+                                                {ecnError && (
+                                                    <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-3 animate-in slide-in-from-top-1 shadow-sm">
+                                                        <AlertOctagon className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                                                        <div className="flex-1">
+                                                            <p className="text-[10px] font-bold text-red-700 leading-tight">{ecnError}</p>
+                                                        </div>
+                                                        <button onClick={() => setEcnError(null)} className="p-1 hover:bg-red-100 rounded-lg text-red-400 transition-colors">
+                                                            <X className="w-3 h-3" />
+                                                        </button>
+                                                    </div>
+                                                )}
+
                                                 {selectedECR.ecns.map((ecn, i) => (
                                                     <div 
                                                         key={i} 

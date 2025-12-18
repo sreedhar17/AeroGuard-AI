@@ -1,10 +1,15 @@
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import * as mammoth from 'mammoth';
 import * as XLSX from 'xlsx';
 import { parseRegulationDocument, semanticSearchRegulations } from '../services/geminiService';
 import { RegulationPipelineResult, ProcessedSegment } from '../types';
-import { Network, Upload, FileText, ArrowRight, BookOpen, AlertCircle, CheckSquare, Layers, Database, Cpu, FileJson, Tag, Loader2, ChevronDown, ChevronUp, Eye, EyeOff, ShieldAlert, FileType, X, AlertTriangle, Sparkles, Search, Library, Trash2 } from 'lucide-react';
+import { 
+    Network, Upload, FileText, ArrowRight, BookOpen, AlertCircle, CheckSquare, 
+    Layers, Database, Cpu, FileJson, Tag, Loader2, ChevronDown, ChevronUp, 
+    Eye, EyeOff, ShieldAlert, FileType, X, AlertTriangle, Sparkles, Search, 
+    Library, Trash2, Filter, RotateCcw
+} from 'lucide-react';
 
 const DEFAULT_TEXT = `CS-25.1309 Equipment, systems and installations.
 (a) The equipment, systems, and installations whose functioning is required by this Subpart, must be designed to ensure that they perform their intended functions under any foreseeable operating condition.
@@ -194,9 +199,29 @@ const RegulationParser: React.FC = () => {
   const [searchResults, setSearchResults] = useState<ProcessedSegment[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
 
+  // Advanced Filtering State
+  const [filterSource, setFilterSource] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterArea, setFilterArea] = useState('');
+  const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
+
   useEffect(() => {
       localStorage.setItem('aero_reg_library', JSON.stringify(library));
   }, [library]);
+
+  const sources = useMemo(() => Array.from(new Set(library.map(s => s.metadata.source_document))).sort(), [library]);
+  const types = ['COMPLIANCE_OBLIGATION', 'GUIDANCE', 'OBSERVATION'];
+  const areas = useMemo(() => Array.from(new Set(library.map(s => s.metadata.lifecycle_area))).sort(), [library]);
+
+  const filteredLibrary = useMemo(() => {
+      const baseSet = searchResults || library;
+      return baseSet.filter(s => {
+          const matchSource = filterSource ? s.metadata.source_document === filterSource : true;
+          const matchType = filterType ? s.normalization === filterType : true;
+          const matchArea = filterArea ? s.metadata.lifecycle_area === filterArea : true;
+          return matchSource && matchType && matchArea;
+      });
+  }, [library, searchResults, filterSource, filterType, filterArea]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -331,6 +356,12 @@ const RegulationParser: React.FC = () => {
       }
   };
 
+  const resetFilters = () => {
+      setFilterSource('');
+      setFilterType('');
+      setFilterArea('');
+  };
+
   const PipelineStep = ({ title, icon, index }: { title: string, icon: React.ReactNode, index: number }) => {
     const isCompleted = index < activeStep;
     const isActive = index === activeStep;
@@ -453,55 +484,119 @@ const RegulationParser: React.FC = () => {
                         <Library className="w-6 h-6 text-blue-600" />
                         Regulatory Semantic Library
                     </h3>
-                    <button onClick={clearLibrary} className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1">
-                        <Trash2 className="w-3.5 h-3.5" /> Clear Index
-                    </button>
+                    <div className="flex items-center gap-4">
+                        <button 
+                            onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
+                            className={`text-xs font-bold flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                                showAdvancedFilters ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                        >
+                            <Filter className="w-3.5 h-3.5" />
+                            {showAdvancedFilters ? 'Hide Filters' : 'Advanced Filters'}
+                        </button>
+                        <button onClick={clearLibrary} className="text-xs font-bold text-red-500 hover:text-red-700 flex items-center gap-1">
+                            <Trash2 className="w-3.5 h-3.5" /> Clear Index
+                        </button>
+                    </div>
                   </div>
                   
-                  <div className="relative group">
-                      <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
-                          <Search className="w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-                      </div>
-                      <input 
-                        type="text" 
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                        placeholder="Natural Language Query (e.g., 'What are the rules for failure probability in CS-25?')"
-                        className="w-full pl-12 pr-32 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-inner"
-                      />
-                      <button 
-                        onClick={handleSearch}
-                        disabled={isSearching || !searchQuery.trim()}
-                        className="absolute right-2 top-2 bottom-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-md transition-all disabled:opacity-50"
-                      >
-                          {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Semantic Search'}
-                      </button>
+                  <div className="space-y-4">
+                    <div className="relative group">
+                        <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+                            <Search className="w-5 h-5 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
+                        </div>
+                        <input 
+                            type="text" 
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                            placeholder="Natural Language Query (e.g., 'What are the rules for failure probability in CS-25?')"
+                            className="w-full pl-12 pr-32 py-4 bg-slate-50 border border-slate-200 rounded-2xl text-slate-900 focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 outline-none transition-all shadow-inner"
+                        />
+                        <button 
+                            onClick={handleSearch}
+                            disabled={isSearching || !searchQuery.trim()}
+                            className="absolute right-2 top-2 bottom-2 px-6 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-md transition-all disabled:opacity-50"
+                        >
+                            {isSearching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Semantic Search'}
+                        </button>
+                    </div>
+
+                    {showAdvancedFilters && (
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl grid grid-cols-1 md:grid-cols-3 gap-4 animate-in slide-in-from-top-2 duration-200">
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Source Document</label>
+                                <select 
+                                    value={filterSource}
+                                    onChange={(e) => setFilterSource(e.target.value)}
+                                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500/20 outline-none cursor-pointer"
+                                >
+                                    <option value="">All Sources</option>
+                                    {sources.map(src => <option key={src} value={src}>{src}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Document Type</label>
+                                <select 
+                                    value={filterType}
+                                    onChange={(e) => setFilterType(e.target.value)}
+                                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500/20 outline-none cursor-pointer"
+                                >
+                                    <option value="">All Types</option>
+                                    {types.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+                                </select>
+                            </div>
+                            <div>
+                                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5 ml-1">Lifecycle Area</label>
+                                <div className="flex gap-2">
+                                    <select 
+                                        value={filterArea}
+                                        onChange={(e) => setFilterArea(e.target.value)}
+                                        className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500/20 outline-none cursor-pointer"
+                                    >
+                                        <option value="">All Areas</option>
+                                        {areas.map(a => <option key={a} value={a}>{a}</option>)}
+                                    </select>
+                                    <button 
+                                        onClick={resetFilters}
+                                        className="p-2 bg-white border border-slate-200 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-blue-600 transition-colors shadow-sm"
+                                        title="Reset Filters"
+                                    >
+                                        <RotateCcw className="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                   </div>
               </div>
 
               {/* Search Results */}
               <div className="space-y-6">
-                  {searchResults ? (
+                  {(searchResults || library.length > 0) ? (
                       <>
                         <div className="flex items-center justify-between">
                             <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                                <Search className="w-4 h-4" /> Top Semantic Matches
+                                {searchResults ? <Search className="w-4 h-4" /> : <Database className="w-4 h-4" />}
+                                {searchResults ? 'Top Semantic Matches' : 'All Indexed Segments'}
+                                <span className="ml-1 px-2 py-0.5 bg-slate-200 text-slate-600 rounded-full text-[10px]">{filteredLibrary.length} items</span>
                             </h4>
-                            <button onClick={() => setSearchResults(null)} className="text-xs text-blue-600 font-bold">View All Library</button>
+                            {searchResults && (
+                                <button onClick={() => setSearchResults(null)} className="text-xs text-blue-600 font-bold hover:underline">View Full Library</button>
+                            )}
                         </div>
-                        {searchResults.length === 0 ? (
-                            <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 text-slate-400 italic">No semantic matches found in library.</div>
+                        {filteredLibrary.length === 0 ? (
+                            <div className="p-16 text-center bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center">
+                                <Search className="w-12 h-12 text-slate-200 mb-4" />
+                                <h3 className="text-lg font-bold text-slate-400">No matching segments found</h3>
+                                <p className="text-sm text-slate-400 mt-1 max-w-xs">Try adjusting your filters or search query to find relevant regulatory data.</p>
+                                <button onClick={resetFilters} className="mt-6 px-4 py-2 bg-blue-50 text-blue-600 text-xs font-black uppercase tracking-widest rounded-lg hover:bg-blue-100 transition-colors">Clear All Filters</button>
+                            </div>
                         ) : (
-                            searchResults.map(s => <SegmentDisplay key={s.id} segment={s} />)
+                            <div className="grid gap-6">
+                                {filteredLibrary.map(s => <SegmentDisplay key={s.id} segment={s} />)}
+                            </div>
                         )}
-                      </>
-                  ) : library.length > 0 ? (
-                      <>
-                        <h4 className="text-sm font-black text-slate-500 uppercase tracking-widest flex items-center gap-2">
-                            <Database className="w-4 h-4" /> All Indexed Segments
-                        </h4>
-                        {library.map(s => <SegmentDisplay key={s.id} segment={s} />)}
                       </>
                   ) : (
                       <div className="p-12 text-center bg-slate-100 rounded-2xl border-2 border-dashed border-slate-200">

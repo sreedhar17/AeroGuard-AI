@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import * as mammoth from 'mammoth';
 import { 
@@ -20,7 +21,8 @@ import {
   History,
   ChevronDown,
   ChevronUp,
-  Clock
+  Clock,
+  Trash2
 } from 'lucide-react';
 import { evaluateCompliance, generateCertificationReport, parseRegulationDocument, extractRequirementsFromDocument } from '../services/geminiService';
 import { ComplianceAuditResult, PLMDataArtifact, ProcessedSegment, CertificationReport } from '../types';
@@ -29,6 +31,7 @@ interface AuditHistoryEntry {
     id: string;
     date: string;
     title: string;
+    source: 'PLM' | 'DOCUMENT';
     score: number;
     riskLevel: string;
     regSegments: ProcessedSegment[];
@@ -85,19 +88,31 @@ const ComplianceAuditHub: React.FC = () => {
         localStorage.setItem('aero_audit_history', JSON.stringify(history));
     }, [history]);
 
-    const addToHistory = (result: ComplianceAuditResult, currentReport: CertificationReport | null) => {
+    const addToHistory = (
+        result: ComplianceAuditResult, 
+        currentReport: CertificationReport | null, 
+        segments: ProcessedSegment[], 
+        data: PLMDataArtifact[],
+        source: 'PLM' | 'DOCUMENT'
+    ) => {
         const newEntry: AuditHistoryEntry = {
             id: Date.now().toString(),
             date: new Date().toLocaleString(),
-            title: uploadedFile?.name || "Automated PLM Audit",
+            title: source === 'DOCUMENT' ? (uploadedFile?.name || "Manual Audit") : "Automated PLM Audit",
+            source,
             score: result.overallScore,
             riskLevel: result.riskLevel,
-            regSegments,
-            plmData,
+            regSegments: segments,
+            plmData: data,
             auditResult: result,
             report: currentReport
         };
-        setHistory(prev => [newEntry, ...prev.slice(0, 9)]); // Keep last 10
+        setHistory(prev => [newEntry, ...prev.slice(0, 19)]); // Keep last 20
+    };
+
+    const deleteHistoryEntry = (e: React.MouseEvent, id: string) => {
+        e.stopPropagation();
+        setHistory(prev => prev.filter(entry => entry.id !== id));
     };
 
     const loadHistoryEntry = (entry: AuditHistoryEntry) => {
@@ -143,7 +158,7 @@ const ComplianceAuditHub: React.FC = () => {
         try {
             await new Promise(r => setTimeout(r, 1000));
             setPlmData(MOCK_PLM_DATA);
-            await runAnalysis(MOCK_PLM_DATA);
+            await runAnalysis(MOCK_PLM_DATA, 'PLM');
         } catch (e) {
             alert("PLM Connection Failed.");
             setStep(0);
@@ -171,7 +186,7 @@ const ComplianceAuditHub: React.FC = () => {
                 setIsLoading(false);
                 return;
             }
-            await runAnalysis(extractedArtifacts);
+            await runAnalysis(extractedArtifacts, 'DOCUMENT');
         } catch (e) {
             alert("Failed to process document.");
             setStep(0);
@@ -180,7 +195,7 @@ const ComplianceAuditHub: React.FC = () => {
         }
     };
 
-    const runAnalysis = async (artifacts: PLMDataArtifact[]) => {
+    const runAnalysis = async (artifacts: PLMDataArtifact[], source: 'PLM' | 'DOCUMENT') => {
         setStep(2);
         try {
             const parseRes = await parseRegulationDocument(DEFAULT_REGULATION_TEXT);
@@ -188,8 +203,7 @@ const ComplianceAuditHub: React.FC = () => {
             const results = await evaluateCompliance(parseRes.segments, artifacts);
             setAuditResult(results);
             setStep(3);
-            // We'll add to history here if report is null, then update history if report is generated later
-            addToHistory(results, null);
+            addToHistory(results, null, parseRes.segments, artifacts, source);
         } catch (e) {
             alert("Compliance Analysis Failed.");
             setStep(0);
@@ -410,27 +424,44 @@ const ComplianceAuditHub: React.FC = () => {
                   </h3>
                   <button onClick={() => setHistory([])} className="text-xs text-red-500 font-medium hover:underline">Clear History</button>
               </div>
-              <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
+              <div className="divide-y divide-slate-100 max-h-96 overflow-y-auto custom-scrollbar">
                   {history.length === 0 ? (
-                      <div className="p-8 text-center text-slate-400 text-sm italic">No past audits recorded.</div>
+                      <div className="p-12 text-center text-slate-400 text-sm italic">
+                          <History className="w-8 h-8 mx-auto mb-2 opacity-20" />
+                          No past audits recorded.
+                      </div>
                   ) : (
                       history.map((entry) => (
-                          <div key={entry.id} className="p-4 hover:bg-slate-50 transition-all flex items-center justify-between group">
+                          <div key={entry.id} className="p-4 hover:bg-slate-50 transition-all flex items-center justify-between group cursor-pointer" onClick={() => loadHistoryEntry(entry)}>
                               <div className="flex items-center gap-4">
-                                  <div className={`p-2 rounded-lg ${entry.score > 80 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                                  <div className={`p-2.5 rounded-xl ${entry.score > 80 ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'} border border-current opacity-70`}>
                                       <span className="text-sm font-black">{entry.score}%</span>
                                   </div>
                                   <div>
-                                      <p className="text-sm font-bold text-slate-800 truncate max-w-[200px]">{entry.title}</p>
-                                      <p className="text-[10px] text-slate-400 font-medium uppercase">{entry.date}</p>
+                                      <div className="flex items-center gap-2">
+                                          <p className="text-sm font-bold text-slate-800 truncate max-w-[200px]">{entry.title}</p>
+                                          <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                                              {entry.source}
+                                          </span>
+                                      </div>
+                                      <p className="text-[10px] text-slate-400 font-medium uppercase mt-0.5">{entry.date}</p>
                                   </div>
                               </div>
-                              <button 
-                                onClick={() => loadHistoryEntry(entry)}
-                                className="opacity-0 group-hover:opacity-100 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-blue-100 flex items-center gap-1"
-                              >
-                                  Restore Session <ArrowRight className="w-3 h-3" />
-                              </button>
+                              <div className="flex items-center gap-2">
+                                  <button 
+                                    onClick={() => loadHistoryEntry(entry)}
+                                    className="opacity-0 group-hover:opacity-100 bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:bg-blue-100 flex items-center gap-1"
+                                  >
+                                      Restore <ArrowRight className="w-3 h-3" />
+                                  </button>
+                                  <button 
+                                    onClick={(e) => deleteHistoryEntry(e, entry.id)}
+                                    className="opacity-0 group-hover:opacity-100 p-2 text-slate-300 hover:text-red-500 transition-all"
+                                    title="Delete record"
+                                  >
+                                      <Trash2 className="w-4 h-4" />
+                                  </button>
+                              </div>
                           </div>
                       ))
                   )}
@@ -571,6 +602,10 @@ const ComplianceAuditHub: React.FC = () => {
             </div>
           </>
       )}
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #bfdbfe; border-radius: 10px; }
+      `}</style>
     </div>
   );
 };
