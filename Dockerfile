@@ -1,28 +1,24 @@
-# Stage 1: Build
+# Stage 1: Build Stage
 FROM node:20-alpine AS builder
 WORKDIR /app
 
-# Accept API_KEY from Secret Manager (passed from cloudbuild.yaml)
+# Accept the API_KEY as a build argument
 ARG API_KEY
+# IMPORTANT: Vite requires the VITE_ prefix to expose variables to the client-side
 ENV VITE_API_KEY=$API_KEY
 
 COPY package*.json ./
 RUN npm install
 COPY . .
+
+# Vite will now bake VITE_API_KEY into the static files
 RUN npm run build
 
-# Stage 2: Runtime
-FROM node:20-alpine
-WORKDIR /app
+# Stage 2: Production Stage
+FROM nginx:stable-alpine
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy from builder stage
+COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Install 'serve' globally to host the static files
-RUN npm install -g serve
-
-# Copy only the 'dist' folder from the builder stage
-COPY --from=builder /app/dist ./dist
-
-# Cloud Run uses port 8080 by default
 EXPOSE 8080
-
-# Serve the 'dist' folder. -s handles SPA routing.
-CMD ["serve", "-s", "dist", "-l", "8080"]
+CMD ["nginx", "-g", "daemon off;"]

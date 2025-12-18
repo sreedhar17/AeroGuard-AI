@@ -1,15 +1,13 @@
 steps:
-  # 1. Build the Docker image using the secret
+  # 1. Build the Docker image
   - name: 'gcr.io/cloud-builders/docker'
-    entrypoint: 'bash'
-    args:
-      - '-c'
-      - |
-        docker build \
-          --build-arg API_KEY=$$MY_SECRET_KEY \
-          -t europe-west3-docker.pkg.dev/${PROJECT_ID}/aeroguard-repo/aeroguard-app \
-          .
-    secretEnv: ['MY_SECRET_KEY']
+    args: 
+      - 'build'
+      - '--build-arg'
+      - 'API_KEY=${_API_KEY}'
+      - '-t'
+      - 'europe-west3-docker.pkg.dev/$PROJECT_ID/aeroguard-repo/aeroguard-app'
+      - '.'
 
   # 2. Deploy to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
@@ -19,22 +17,19 @@ steps:
       - 'deploy'
       - 'aeroguard-compliance-service'
       - '--image'
-      - 'europe-west3-docker.pkg.dev/${PROJECT_ID}/aeroguard-repo/aeroguard-app'
+      - 'europe-west3-docker.pkg.dev/$PROJECT_ID/aeroguard-repo/aeroguard-app'
       - '--region'
       - 'europe-west3'
       - '--allow-unauthenticated'
       - '--port'
       - '8080'
 
-# Tells Cloud Build where to push the image
+# List the images to be pushed to the registry automatically
 images:
-  - 'europe-west3-docker.pkg.dev/${PROJECT_ID}/aeroguard-repo/aeroguard-app'
+  - 'europe-west3-docker.pkg.dev/$PROJECT_ID/aeroguard-repo/aeroguard-app'
 
-# Fetch the secret from Secret Manager
-availableSecrets:
-  secretManager:
-    - versionName: projects/${PROJECT_ID}/secrets/AERO_API_KEY/versions/latest
-      env: 'MY_SECRET_KEY'
+substitutions:
+  _API_KEY: 'REPLACE_ME_IN_CLOUD_BUILD_CONSOLE'
 
 options:
   logging: CLOUD_LOGGING_ONLY

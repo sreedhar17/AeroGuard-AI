@@ -1,4 +1,3 @@
-
 import React, { useState, useRef, useEffect } from 'react';
 import { auditorChat } from '../services/geminiService';
 import { ChatMessage } from '../types';
@@ -44,7 +43,8 @@ const VirtualAuditor: React.FC = () => {
             parts: [{ text: m.text }]
         }));
 
-        const responseText = await auditorChat(history, userMsg.text);
+        // Ensuring we treat the result as a solid string to satisfy TS
+        const responseText: string = (await auditorChat(history, userMsg.text)) || "No response received.";
         
         const botMsg: ChatMessage = {
             id: (Date.now() + 1).toString(),
@@ -53,14 +53,14 @@ const VirtualAuditor: React.FC = () => {
             timestamp: Date.now()
         };
         setMessages(prev => [...prev, botMsg]);
-    } catch (error) {
-        const errorMsg: ChatMessage = {
+    } catch (error: any) {
+        const botMsg: ChatMessage = {
             id: (Date.now() + 1).toString(),
             role: 'model',
-            text: "I encountered an error accessing the regulations database. Please try again.",
+            text: `I encountered an error: ${error.message || "Please check your configuration."}`,
             timestamp: Date.now()
         };
-        setMessages(prev => [...prev, errorMsg]);
+        setMessages(prev => [...prev, botMsg]);
     } finally {
         setIsTyping(false);
     }
